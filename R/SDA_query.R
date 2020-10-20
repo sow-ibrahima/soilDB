@@ -103,7 +103,7 @@ format_SQL_in_statement <- function(x) {
 #' @keywords manip
 #' @examples
 #' \donttest{
-#' if(requireNamespace("curl") &
+#' if(requireNamespace("curl") & requireNamespace("wk") &
 #'    curl::has_internet()) {
 #'   
 #'   ## get SSURGO export date for all soil survey areas in California
@@ -144,21 +144,16 @@ format_SQL_in_statement <- function(x) {
 #'   # there is no need to filter STATSGO because
 #'   # SDA_Get_Mukey_from_intersection_with_WktWgs84() implies SSURGO
 #'   #
-#'   # requires raster and rgeos packages because raster is suggested
-#'   # and rgeos is additional
-#'   if(require(raster) & require(rgeos)) {
-#'     # text -> bbox -> WKT
-#'     # xmin, xmax, ymin, ymax
-#'     b <- c(-120.9, -120.8, 37.7, 37.8)
-#'     p <- writeWKT(as(extent(b), 'SpatialPolygons'))
-#'     q <- paste0("SELECT mukey, cokey, compname, comppct_r FROM component 
+#'   # create wkt bounding box
+#'   #
+#'   p <- wk::as_wkt(wk::rct(-120.9, 37.7, -120.8, 37.8))
+#'   q <- paste0("SELECT mukey, cokey, compname, comppct_r FROM component 
 #'       WHERE mukey IN (SELECT DISTINCT mukey FROM
 #'       SDA_Get_Mukey_from_intersection_with_WktWgs84('", p, 
 #'        "')) ORDER BY mukey, cokey, comppct_r DESC")
 #'     
-#'     x <- SDA_query(q)
-#'     str(x)
-#'   }
+#'    x <- SDA_query(q)
+#'    str(x)
 #'  }
 #' }
 

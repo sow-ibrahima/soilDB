@@ -26,48 +26,22 @@
 #' 
 #' @details The SDA website can be found at \url{https://sdmdataaccess.nrcs.usda.gov}. See the \href{http://ncss-tech.github.io/AQP/soilDB/SDA-tutorial.html}{SDA Tutorial} for detailed examples.
 #' 
-#' @note This function requires the `httr`, `jsonlite`, `XML`, and `rgeos` packages.
+#' @note This function requires the `httr`, `jsonlite`, `XML` , `wk`, and `sf` packages.
 #' 
 #' @author D.E. Beaudette
 #' 
 #' @return A \code{Spatial*} object.
 #' 
 processSDA_WKT <- function(d, g='geom', p4s='+proj=longlat +datum=WGS84') {
-  # iterate over features (rows) and convert into list of SPDF
-  p <- list()
-  n <- nrow(d)
   
-  # points or polygons?
-  # looking at the first feature for efficiency, all others should be the same
-  g.type <- class(rgeos::readWKT(d[1, g]))
+  # SDA is always this CRS; proj4string approach obsolete
+  stopifnot(g == 'geom', p4s == '+proj=longlat +datum=WGS84')
   
-  for(i in seq(1, n)) {
-    # extract the current row in the DF
-    d.i <- d[i, ] 
-    # extract the current feature from WKT
-    p.i <- rgeos::readWKT(d.i[[g]], id = i, p4s = p4s)
-    # remove geom from current row of DF
-    d.i[[g]] <- NULL
-    
-    # compose SpatialPointsDataFrame, with other attributes
-    if(g.type == 'SpatialPoints')
-      s.i <- SpatialPointsDataFrame(p.i, data=cbind(data.frame(gid=i, stringsAsFactors = FALSE), d.i), match.ID = FALSE)
-    
-    # compose SpatialPolygonsDataFrame, with other attributes
-    if(g.type == 'SpatialPolygons')
-      s.i <- SpatialPolygonsDataFrame(p.i, data=cbind(data.frame(gid=i, stringsAsFactors = FALSE), d.i), match.ID = FALSE)
-    
-    
-    # fix column names
-    names(s.i) <- c('gid', names(d.i))
-    # save to list
-    p[[i]] <- s.i
-  }
-  
-  # reduce list to single SPDF
-  spdf <- do.call('rbind', p)
-  
-  return(spdf)
+  # convert wkt to SPDF
+  d[[g]] <- sf::st_as_sfc(wk::as_wkt(d[,g]))
+  sfobj <- sf::st_as_sf(d)
+  sfobj <- sf::st_set_crs(sfobj, sf::st_crs(4326))
+  return(sf::as_Spatial(sfobj))
 }
 
 
@@ -326,13 +300,9 @@ FROM geom_data;
 #' 
 SDA_spatialQuery <- function(geom, what='mukey', geomIntersection=FALSE,
   db = c("SSURGO", "STATSGO")) {
-
-  # check for required packages
-  if(!requireNamespace('rgeos', quietly = TRUE))
-    stop('please install the `rgeos` package', call.=FALSE)
   
   # sanity checks
-  if(! what %in% c('mukey', 'geom')) {
+  if (!what %in% c('mukey', 'geom')) {
     stop("query type must be either 'mukey' or 'geom'",call. = FALSE)
   }
 
@@ -348,39 +318,39 @@ SDA_spatialQuery <- function(geom, what='mukey', geomIntersection=FALSE,
   }
   
   # geom must have a valid CRS
-  if(is.na(proj4string(geom))) {
+  if (is.na(proj4string(geom))) {
     stop('`geom` must have a valid CRS', call. = FALSE)
   }
   
   # CRS conversion if needed
   target.prj <- "+proj=longlat +datum=WGS84"
-  if(proj4string(geom) != target.prj) {
+  if (proj4string(geom) != target.prj) {
     geom <- spTransform(geom, CRS(target.prj))
   }
   
   # WKT encoding
   # use a geometry collection
-  wkt <- rgeos::writeWKT(geom, byid = FALSE)
+  wkt <- wk::as_wkt(sf::st_as_sf(geom)$geometry)
   
   # slower query, returning geom + mukey
   # replacement for depreciated SDA_query_features()
   # 10-30x faster than spatial-returning query by input feature
   # TODO: this is 15x slower than non-spatial-returning-query in SDA_query_features()
-  if(what == 'geom') {
+  if (what == 'geom') {
 
     # return intersection + area
-    if(geomIntersection) {
+    if (geomIntersection) {
       
       # select the appropriate query
       .template <- .SDA_geometrySelector(db = db, method = 'intersection')
-      q <- sprintf(.template, wkt, wkt)
+      q <- sprintf(.template, as.character(wkt), as.character(wkt))
                    
     } else {
       # return overlapping
       
       # select the appropriate query
       .template <- .SDA_geometrySelector(db = db, method = 'overlap')
-      q <- sprintf(.template, wkt)
+      q <- sprintf(.template, as.character(wkt))
     }
     
     
@@ -413,72 +383,72 @@ SDA_spatialQuery <- function(geom, what='mukey', geomIntersection=FALSE,
 
 
 ## now deprecated
-SDA_make_spatial_query <- function(i) {
-  
-  .Deprecated(new = 'SDA_spatialQuery')
-  
-  # check for required packages
-  if(!requireNamespace('rgeos', quietly = TRUE))
-    stop('please install the `rgeos` package', call.=FALSE)
-  
-  # convert single feature to WKT
-  i.wkt <- rgeos::writeWKT(i, byid = FALSE)
-  
-  # programatically generate query
-  q <- paste0("SELECT mukey, muname
-              FROM mapunit
-              WHERE mukey IN (
-              SELECT DISTINCT mukey from SDA_Get_Mukey_from_intersection_with_WktWgs84('", i.wkt, "')
-              )")
-  
-  # send query, messages aren't useful here
-  res <- suppressMessages(SDA_query(q))
-  
-  # check for no data
-  if(is.null(res))
-    res <- NA
-  
-  # done
-  return(res)
-}
-
-# this is a safe way to query features while preserving IDs
-# note that it is a very slow for large collections
-# x is a Spatial* object with more than 1 feature
-# id is the name of an attribute that contains a unique ID for each feature
-## now deprecated
-SDA_query_features <- function(x, id='pedon_id') {
-  
-  .Deprecated(new = 'SDA_spatialQuery')
-  
-  # sanity check: ensure that the ID is unique
-  if(length(x[[id]]) != length(unique(x[[id]])))
-    stop('id is not unique')
-  
-  # transform to GCS WGS84 if needed
-  target.prj <- "+proj=longlat +datum=WGS84"
-  if(proj4string(x) != target.prj) {
-    geom <- spTransform(x, CRS(target.prj))
-  }
-  
-  # iterate over features and save to list
-  l <- list()
-  n <- length(geom)
-  # setup a progress bar for timing
-  pb <- txtProgressBar(max=n, style=3)
-  for(i in 1:n) {
-    # make query
-    res <- SDA_make_spatial_query(geom[i, ])
-    # save results along with an ID
-    res <- cbind(id=geom[[id]][i], res, stringsAsFactors = FALSE)
-    names(res) <- c(id, 'mukey', 'muname')
-    l[[i]] <- res
-    setTxtProgressBar(pb, i)
-  }
-  close(pb)
-  
-  # convert to data.frame, there may be > 1 row / feature when using lines / polygons
-  d <- ldply(l)
-  return(d)
-}
+# SDA_make_spatial_query <- function(i) {
+#   
+#   .Deprecated(new = 'SDA_spatialQuery')
+#   
+#   # check for required packages
+#   if(!requireNamespace('rgeos', quietly = TRUE))
+#     stop('please install the `rgeos` package', call.=FALSE)
+#   
+#   # convert single feature to WKT (rgeos)
+#   i.wkt <- rgeos::writeWKT(i, byid = FALSE)
+#   
+#   # programatically generate query
+#   q <- paste0("SELECT mukey, muname
+#               FROM mapunit
+#               WHERE mukey IN (
+#               SELECT DISTINCT mukey from SDA_Get_Mukey_from_intersection_with_WktWgs84('", i.wkt, "')
+#               )")
+#   
+#   # send query, messages aren't useful here
+#   res <- suppressMessages(SDA_query(q))
+#   
+#   # check for no data
+#   if(is.null(res))
+#     res <- NA
+#   
+#   # done
+#   return(res)
+# }
+# 
+# # this is a safe way to query features while preserving IDs
+# # note that it is a very slow for large collections
+# # x is a Spatial* object with more than 1 feature
+# # id is the name of an attribute that contains a unique ID for each feature
+# ## now deprecated
+# SDA_query_features <- function(x, id='pedon_id') {
+#   
+#   .Deprecated(new = 'SDA_spatialQuery')
+#   
+#   # sanity check: ensure that the ID is unique
+#   if(length(x[[id]]) != length(unique(x[[id]])))
+#     stop('id is not unique')
+#   
+#   # transform to GCS WGS84 if needed
+#   target.prj <- "+proj=longlat +datum=WGS84"
+#   if(proj4string(x) != target.prj) {
+#     geom <- spTransform(x, CRS(target.prj))
+#   }
+#   
+#   # iterate over features and save to list
+#   l <- list()
+#   n <- length(geom)
+#   # setup a progress bar for timing
+#   pb <- txtProgressBar(max=n, style=3)
+#   for(i in 1:n) {
+#     # make query
+#     res <- SDA_make_spatial_query(geom[i, ])
+#     # save results along with an ID
+#     res <- cbind(id=geom[[id]][i], res, stringsAsFactors = FALSE)
+#     names(res) <- c(id, 'mukey', 'muname')
+#     l[[i]] <- res
+#     setTxtProgressBar(pb, i)
+#   }
+#   close(pb)
+#   
+#   # convert to data.frame, there may be > 1 row / feature when using lines / polygons
+#   d <- ldply(l)
+#   return(d)
+# }
 

@@ -66,21 +66,17 @@ if(requireNamespace("curl") &
   # there is no need to filter STATSGO because
   # SDA_Get_Mukey_from_intersection_with_WktWgs84() implies SSURGO
   #
-  # requires raster and rgeos packages because raster is suggested
-  # and rgeos is additional
-  if(require(raster) & require(rgeos)) {
-    # text -> bbox -> WKT
-    # xmin, xmax, ymin, ymax
-    b <- c(-120.9, -120.8, 37.7, 37.8)
-    p <- writeWKT(as(extent(b), 'SpatialPolygons'))
-    q <- paste0("SELECT mukey, cokey, compname, comppct_r FROM component 
+  # text -> bbox -> WKT
+  # xmin, xmax, ymin, ymax
+  b <- c(-120.9, -120.8, 37.7, 37.8)
+  p <- wk::as_wkt(wk::rct(b[1], b[3], b[2], b[4]))
+  q <- paste0("SELECT mukey, cokey, compname, comppct_r FROM component 
       WHERE mukey IN (SELECT DISTINCT mukey FROM
       SDA_Get_Mukey_from_intersection_with_WktWgs84('", p, 
        "')) ORDER BY mukey, cokey, comppct_r DESC")
     
-    x <- SDA_query(q)
-    str(x)
-  }
+   x <- SDA_query(q)
+   str(x)
  }
 }
 }
