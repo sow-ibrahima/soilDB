@@ -4,7 +4,7 @@
 fetchNASIS <- function(from='pedons', 
                        url = NULL, 
                        SS = TRUE, 
-                       rmHzErrors = TRUE,
+                       rmHzErrors = FALSE,
                        nullFragsAreZero = TRUE, 
                        soilColorState = 'moist', 
                        lab = FALSE, 

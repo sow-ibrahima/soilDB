@@ -1,7 +1,7 @@
 
 
 # get NASIS site/pedon/horizon/diagnostic feature data
-.fetchNASIS_pedons <- function(SS=TRUE, rmHzErrors=TRUE, nullFragsAreZero=TRUE, 
+.fetchNASIS_pedons <- function(SS=TRUE, rmHzErrors=FALSE, nullFragsAreZero=TRUE, 
                                soilColorState='moist', lab=FALSE, stringsAsFactors = default.stringsAsFactors()) {
   
   # test connection
@@ -56,28 +56,6 @@
     # make the edit
     h$hzdepb[top.eq.bottom.idx] <- h$hzdepb[top.eq.bottom.idx] + 1
   }
-
-  ## test for horizonation inconsistencies... flag, and optionally remove
-  # ~ 1.3 seconds / ~ 4k pedons
-  h.test <- do.call('rbind', lapply(split(h, h$peiid), function(d) {
-    res <- aqp::hzDepthTests(top=d[['hzdept']], bottom=d[['hzdepb']])
-    # print(res)
-    return(data.frame(peiid = d$peiid, hz_logic_pass=all(!res)))
-  }))
-  
-  # which are the good (valid) ones?
-  good.ids <- as.character(h.test$peiid[which(h.test$hz_logic_pass)])
-  bad.ids <- as.character(h.test$peiid[which(!h.test$hz_logic_pass)])
-  bad.horizons <- h[which(!h.test$hz_logic_pass), c(1:4,6,7)]
-  bad.pedon.ids <- site_data$pedon_id[which(site_data$peiid %in% bad.ids)]
-  
-  # optionally filter pedons WITH NO horizonation inconsistencies
-  if(rmHzErrors)
-    h <- h[which(h$peiid %in% good.ids), ]
-  
-  # keep track of those pedons with horizonation errors
-  assign('bad.pedon.ids', value=bad.pedon.ids, envir=soilDB.env)
-  assign("bad.horizons", value = data.frame(bad.horizons), envir = soilDB.env)
 
   # convert pedon and horizon unique ID to character
   h$peiid <- as.character(h$peiid)
@@ -242,6 +220,23 @@
     horizons(h) <- phlabresults
     #h <- join(h, phlabresults, by = "phiid", type = "left")
   }
+  
+  ## test for horizonation inconsistencies
+  h.test <- aqp::checkHzDepthLogic(h)
+  
+  # which are the good (valid) ones?
+  good.ids <- as.character(h.test$peiid[which(h.test$valid)])
+  bad.ids <- as.character(h.test$peiid[which(!h.test$valid)])
+  bad.horizons <- horizons(h)[which(!h.test$valid), c(1:4,6,7)]
+  bad.pedon.ids <- site_data$pedon_id[which(site_data$peiid %in% bad.ids)]
+  
+  # optionally filter pedons WITH NO horizonation inconsistencies
+  if(rmHzErrors)
+    h <- h[which(h$peiid %in% good.ids), ]
+  
+  # keep track of those pedons with horizonation errors
+  assign('bad.pedon.ids', value=bad.pedon.ids, envir=soilDB.env)
+  assign("bad.horizons", value = data.frame(bad.horizons), envir = soilDB.env)
   
   # done
   return(h)
